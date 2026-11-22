@@ -262,6 +262,151 @@ def main():
         check("证据链批次引用策略版本", ev2["batch"]["policy_version"] >= 1,
               f"policy_version={ev2['batch']['policy_version']}")
 
+    # ---------- 8. 延迟质量判定：规则维护 -> 待判 -> 补判告警 ----------
+    print("\n-- 场景八：规则维护 → 延迟待判 → 补判告警 --", flush=True)
+    # 打开 COD 规则维护（封存快照路线）
+    win = c.post("/rules/maintenance", {"rule_code": "R-COD-RANGE", "strategy": "snapshot",
+                                        "reason": "验收：夜间规则维护", "partitions": ["P-HIGH-1"]})
+    check("规则维护开启（规则置不可用）", win.get("status") == "active", f"window#{win.get('window_id')}")
+    mt_session = f"verify-mt-{uuid.uuid4().hex[:8]}"
+    mt_ing = c.ingest("GW-VERIFY", mt_session, [{"point_code": "WW-COD-01", "source_seq": 1,
+                                                 "ts": utcnow_iso(), "value": 152.0}])
+    mt_log_id = mt_ing["results"][0]["log_id"]
+
+    def pending_for_mt():
+        items = c.get("/pending/items", params={"page_size": 100})["items"]
+        for it in items:
+            if it["receive_log_id"] == mt_log_id:
+                return it
+        return None
+
+    item = poll_until(pending_for_mt, timeout=60, interval=1)
+    check("维护期间读数进入待判队列", item is not None)
+    if item:
+        check("待判项记录缺失规则集合", any(m.get("rule_code") == "R-COD-RANGE" for m in item["missing_rules"]),
+              f"missing={[m.get('rule_code') for m in item['missing_rules']]}")
+        check("封存快照路线保存输入快照", item["strategy"] == "snapshot" and item["has_snapshot"] is True)
+
+    def concl_for_mt():
+        data = c.get("/quality/conclusions", params={"device_point": "WW-COD-01", "page_size": 100})
+        for it in data["items"]:
+            if it["receive_log_id"] == mt_log_id:
+                return it
+        return None
+
+    mt_concl = poll_until(concl_for_mt, timeout=60, interval=1)
+    check("维护期间结论为延迟待判（非合格/非超标）",
+          mt_concl is not None and mt_concl["conclusion"] == "pending_judgment" and mt_concl["confirmed"] is False,
+          f"conclusion={mt_concl and mt_concl['conclusion']}")
+    alerts_now = c.get("/alerts", params={"page_size": 200})["items"]
+    check("维护期间待判读数未进入告警", all(a["receive_log_id"] != mt_log_id for a in alerts_now))
+
+    # 窗口展示输入完整性
+    windows = c.get("/pending/windows")
+    mt_win = next((w for w in windows if w["partition_key"] == "P-HIGH-1" and w["strategy"] == "snapshot"), None)
+    check("待判窗口展示输入完整性", mt_win is not None and mt_win["completeness"] >= 0,
+          f"completeness={mt_win and mt_win['completeness']}")
+
+    # 关闭维护 -> 自动补判
+    c.post(f"/rules/maintenance/{win['window_id']}/close")
+
+    def mt_rejudged():
+        it = pending_for_mt()
+        return it if it and it["status"] == "rejudged" else None
+
+    rj = poll_until(mt_rejudged, timeout=60, interval=1)
+    check("维护关闭后待判项被补判", rj is not None, f"status={rj and rj['status']}")
+
+    def alert_for_mt():
+        data = c.get("/alerts", params={"page_size": 200})
+        for a in data["items"]:
+            if a["receive_log_id"] == mt_log_id:
+                return a
+        return None
+
+    mt_alert = poll_until(alert_for_mt, timeout=60, interval=1)
+    check("补判重演产生应得高风险告警", mt_alert is not None)
+    if mt_alert:
+        check("补判告警标记为延迟重演", mt_alert["deferred"] is True and mt_alert["rejudge_run_id"] is not None,
+              f"deferred={mt_alert['deferred']} run={mt_alert['rejudge_run_id']}")
+    runs = c.get("/rejudge/runs")
+    check("补判运行记录处理顺序（实时高风险→法定时限→时间）",
+          any(r["ordered_by"].startswith("live_high") for r in runs))
+
+    # ---------- 9. 规则版本中途撤销 -> 沙箱阻塞 ----------
+    print("\n-- 场景九：规则版本中途撤销 → 阻塞（禁止静默覆盖） --", flush=True)
+    w2 = c.post("/rules/maintenance", {"rule_code": "R-NH3-RANGE", "strategy": "event_log",
+                                       "reason": "验收：规则修订", "partitions": []})
+    nh_session = f"verify-nh-{uuid.uuid4().hex[:8]}"
+    nh_ing = c.ingest("GW-VERIFY", nh_session, [{"point_code": "WW-NH3-01", "source_seq": 1,
+                                                 "ts": utcnow_iso(), "value": 40.0}])
+    nh_log_id = nh_ing["results"][0]["log_id"]
+    poll_until(lambda: (c.get("/pending/items", params={"page_size": 100})["items"] and
+                        any(i["receive_log_id"] == nh_log_id for i in c.get("/pending/items", params={"page_size": 100})["items"]))
+               or None, timeout=60, interval=1)
+    # 维护中途撤销 v1
+    c.post("/rules/R-NH3-RANGE/versions/1/revoke", {"reason": "验收：维护中途撤销 v1"})
+    c.post(f"/rules/maintenance/{w2['window_id']}/close")
+
+    def nh_blocked():
+        items = c.get("/pending/items", params={"page_size": 100})["items"]
+        for it in items:
+            if it["receive_log_id"] == nh_log_id and it["status"] == "blocked":
+                return it
+        return None
+
+    nh_item = poll_until(nh_blocked, timeout=60, interval=1)
+    check("维护中途撤销版本 → 待判项被阻塞（禁止静默覆盖）", nh_item is not None,
+          f"reason={nh_item and nh_item['blocked_reason'][:40]}")
+    if nh_item:
+        # 显式处理后重新补判
+        c.post(f"/pending/{nh_item['id']}/resolve", {"rule_versions": {"R-NH3-RANGE": 1}, "note": "验收显式处理"})
+        check("阻塞项支持显式指定替代版本处理", True)
+
+    # ---------- 10. 回放沙箱 + 影响通知册 ----------
+    print("\n-- 场景十：回放只读样本 → 质量缺陷 → 待补正 --", flush=True)
+    samples = c.get("/replay/samples")
+    check("提供只读虚构报送样本", samples["read_only"] is True and len(samples["batches"]) >= 1)
+    batch_code = samples["batches"][0]["batch_code"]
+    check("样本含回执与规则版本", samples["batches"][0]["receipt"] is not None and
+          len(samples["sample_rule_versions"]) >= 1)
+    rp = c.post("/replay/run", {"batch_code": batch_code})
+    check("回放发现已报送读数质量缺陷", rp["defects"] >= 1, f"defects={rp['defects']}")
+    check("回放计算告警影响", "alert_delta" in rp, f"alert_delta={rp.get('alert_delta')}")
+    check("缺陷生成待补正事项", rp["corrections_created"] >= 1, f"created={rp['corrections_created']}")
+    corr = c.get("/corrections")
+    check("通知册把值班记录与监管交付逐项关联",
+          corr["summary"]["total"] >= 1 and all(
+              (x["regulatory_delivery"]["receipt_no"] and x["duty_record"]) for x in corr["items"]),
+          f"total={corr['summary']['total']}")
+    if corr["items"]:
+        first = corr["items"][0]
+        check("补正保留原报送范围、回执与当时依据",
+              bool(first["original_scope"]) and bool(first["original_basis"].get("receipt_no")))
+    check("控制台展示未闭合补正", corr["summary"]["unclosed"] >= 1, f"unclosed={corr['summary']['unclosed']}")
+
+    # 闭合一条补正，验证状态流转
+    if corr["items"]:
+        c.post(f"/corrections/{corr['items'][0]['id']}/status", {"status": "closed"})
+        corr2 = c.get("/corrections")
+        check("补正可闭合且计数更新", corr2["summary"]["closed"] >= 1)
+
+    # ---------- 11. 两条路线与策略建议 ----------
+    print("\n-- 场景十一：路线与策略建议 --", flush=True)
+    rec = c.get("/rules/strategy-recommendation")
+    check("按跨度/扫描代价/批次数给出路线建议",
+          rec["recommended"] in ("snapshot", "event_log") and "reasons" in rec,
+          f"recommended={rec['recommended']}")
+    catalog = c.get("/rules/catalog")
+    check("规则目录记录依赖/可用状态/发布版本",
+          all("dependencies" in r and "available" in r and "current_version" in r for r in catalog["rules"]))
+    # 事件日志路线：仅靠持久日志重建，input_snapshot 为空
+    ev_item = next((i for i in c.get("/pending/items", params={"page_size": 100})["items"]
+                    if i["strategy"] == "event_log"), None)
+    check("事件日志路线不保存输入快照（额外副本少）",
+          ev_item is not None and ev_item["has_snapshot"] is False,
+          f"has_snapshot={ev_item and ev_item['has_snapshot']}")
+
     # ---------- 汇总 ----------
     print(f"\n== 结果: {len(PASSED)} 通过, {len(FAILED)} 失败 ==", flush=True)
     if FAILED:

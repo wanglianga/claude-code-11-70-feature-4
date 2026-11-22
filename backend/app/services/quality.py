@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from sqlalchemy import case
 
@@ -11,21 +11,68 @@ from ..models import (
     QualityConclusion,
     ReceiveLog,
 )
-from . import alerts
+from . import alerts, judge as judge_mod, pending as pending_svc, rules as rules_svc
 from .common import get_state
 
 
 def evaluate(db, log: ReceiveLog, device: Device | None, batch: Batch) -> QualityConclusion:
-    """质量服务：范围 / 时序 / 设备状态三项检查，输出结论。"""
-    range_ok = True
-    if device is not None:
-        if device.threshold_min is not None and log.value < device.threshold_min:
-            range_ok = False
-        if device.threshold_max is not None and log.value > device.threshold_max:
-            range_ok = False
-    # 时序检查：读数时间不应晚于接收时间（容忍 5 分钟时钟偏差）
-    ts_ok = log.reading_ts <= log.received_at + timedelta(minutes=5)
-    device_ok = (log.device_status_at_receipt or "normal") == "normal"
+    """质量服务：范围 / 时序 / 设备状态三项检查，输出结论。
+
+    若该因子当前有规则不可用（维护/撤销），则不给出 normal/exceed，
+    而是写入 pending_judgment（保留读数，未确认），并放入待判队列等待补判。
+    """
+    factor = device.factor if device else "*"
+    missing = rules_svc.unavailable_rules(db, factor)
+
+    if missing:
+        # 规则不可执行：读数保留为待判，绝不当作合格或超标
+        cfg = rules_svc.get_pending_config(db)
+        # 路线以维护窗口选择为准；无窗口（如目录标记不可用）时退回默认路线
+        win_strategy = next(
+            (m.get("strategy") for m in missing if m.get("strategy")), None
+        )
+        if win_strategy is None:
+            # 从维护窗口查询（missing 中携带 window id）
+            win_id = next((m.get("maintenance_window_id") for m in missing if m.get("maintenance_window_id")), None)
+            if win_id is not None:
+                from ..models import MaintenanceWindow
+
+                w = db.get(MaintenanceWindow, win_id)
+                win_strategy = w.strategy if w else None
+        strategy = win_strategy or cfg.default_strategy or "snapshot"
+        concl = QualityConclusion(
+            receive_log_id=log.id,
+            batch_id=batch.id,
+            device_point=log.device_point,
+            partition_key=log.partition_key,
+            policy_version=batch.policy_version,
+            range_ok=None,
+            ts_ok=None,
+            device_status_ok=None,
+            gap_detected=False,
+            conclusion="pending_judgment",
+            confirmed=False,
+            detail=(
+                f"规则不可执行（{', '.join(m['rule_code'] for m in missing)}），"
+                f"读数保留待判，规则恢复后补判"
+            )[:512],
+            deferred=False,
+            missing_rules=missing,
+            rule_version=None,
+        )
+        db.add(concl)
+        db.flush()
+        pending_svc.enqueue_pending(db, log, device, missing, strategy)
+        return concl
+
+    res = judge_mod.judge(
+        value=log.value,
+        reading_ts=log.reading_ts,
+        received_at=log.received_at,
+        device_status=log.device_status_at_receipt,
+        threshold_min=device.threshold_min if device else None,
+        threshold_max=device.threshold_max if device else None,
+    )
 
     # 采样间隔缺口检查（信息项，不改变结论）
     gap = False
@@ -43,33 +90,19 @@ def evaluate(db, log: ReceiveLog, device: Device | None, batch: Batch) -> Qualit
         if prev is not None:
             gap = (log.reading_ts - prev.reading_ts).total_seconds() > 2 * device.sampling_period_sec
 
-    if not device_ok:
-        # 设备处于校准/维护：保留来源与待核结论，不作为正式超标
-        conclusion, confirmed = "pending_review", False
-        detail = f"设备接收时状态为 {log.device_status_at_receipt}，保留来源，待人工复核"
-    elif not ts_ok:
-        conclusion, confirmed = "pending_review", False
-        detail = "时序异常：读数时间晚于接收时间，待人工复核"
-    elif not range_ok:
-        conclusion, confirmed = "exceed", True
-        detail = f"数值 {log.value} 超出阈值 [{device.threshold_min}, {device.threshold_max}]"
-    else:
-        conclusion, confirmed = "normal", True
-        detail = "范围/时序/设备状态检查通过"
-
     return QualityConclusion(
         receive_log_id=log.id,
         batch_id=batch.id,
         device_point=log.device_point,
         partition_key=log.partition_key,
         policy_version=batch.policy_version,  # 结论引用批次创建时的策略版本
-        range_ok=range_ok,
-        ts_ok=ts_ok,
-        device_status_ok=device_ok,
+        range_ok=res["range_ok"],
+        ts_ok=res["ts_ok"],
+        device_status_ok=res["device_status_ok"],
         gap_detected=gap,
-        conclusion=conclusion,
-        confirmed=confirmed,
-        detail=detail,
+        conclusion=res["conclusion"],
+        confirmed=res["confirmed"],
+        detail=res["detail"],
     )
 
 
@@ -99,6 +132,10 @@ def quality_tick(db) -> bool:
     max_log_id = 0
     for item, log in rows:
         device = devices.get(log.device_point)
+        # 同一日志只判定一次（补判/重跑幂等）
+        if db.query(QualityConclusion).filter(QualityConclusion.receive_log_id == log.id).first() is not None:
+            max_log_id = max(max_log_id, log.id)
+            continue
         conclusion = evaluate(db, log, device, batch)
         db.add(conclusion)
         db.flush()

@@ -16,6 +16,16 @@
       <el-table-column prop="id" label="#" width="70" />
       <el-table-column prop="device_point" label="点位" width="120" />
       <el-table-column prop="message" label="内容" show-overflow-tooltip />
+      <el-table-column label="来源" width="110">
+        <template #default="{ row }">
+          <el-tag :type="row.deferred ? 'warning' : 'info'" size="small">
+            {{ row.deferred ? '补判重演' : '实时' }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="规则版本" width="90">
+        <template #default="{ row }">{{ row.rule_version ?? '-' }}</template>
+      </el-table-column>
       <el-table-column prop="received_at" label="读数接收时间(UTC)" width="180" />
       <el-table-column prop="created_at" label="告警时间(UTC)" width="180" />
       <el-table-column label="接收→告警" width="130">

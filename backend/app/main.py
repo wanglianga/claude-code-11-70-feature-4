@@ -11,9 +11,21 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config
 from .db import Base, SessionLocal, engine
-from .routers import alerts_api, auth, devices, ingest_api, logs, ops, policies, simulate
+from .routers import (
+    alerts_api,
+    auth,
+    devices,
+    ingest_api,
+    logs,
+    ops,
+    pending_api,
+    policies,
+    replay_api,
+    rules_api,
+    simulate,
+)
 from .seed import seed
-from .services import metrics, quality, recovery, scheduler
+from .services import metrics, pending, quality, recovery, scheduler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("app")
@@ -55,6 +67,7 @@ async def lifespan(app: FastAPI):
         ("quality", quality.quality_tick, 0.3, True),
         ("metrics", metrics.metrics_tick, 2.0, False),
         ("recovery", recovery.recovery_tick, 5.0, False),
+        ("rejudge", pending.rejudge_tick, config.REJUDGE_INTERVAL_SEC, False),
     ]
     for name, fn, interval, repeat in jobs:
         t = threading.Thread(target=_worker, args=(name, fn, interval, repeat), daemon=True, name=f"svc-{name}")
@@ -77,7 +90,8 @@ app.add_middleware(
 )
 
 for r in (auth.router, devices.router, ingest_api.router, logs.router, policies.router,
-          alerts_api.router, ops.router, simulate.router):
+          alerts_api.router, ops.router, simulate.router, rules_api.router, pending_api.router,
+          replay_api.router):
     app.include_router(r)
 
 

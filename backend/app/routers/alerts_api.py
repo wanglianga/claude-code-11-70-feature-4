@@ -24,6 +24,9 @@ def alert_to_dict(a: Alert):
         "latency_ms": a.latency_ms,
         "acked_at": a.acked_at.isoformat() if a.acked_at else None,
         "acked_by": a.acked_by,
+        "deferred": a.deferred,
+        "rejudge_run_id": a.rejudge_run_id,
+        "rule_version": a.rule_version,
     }
 
 

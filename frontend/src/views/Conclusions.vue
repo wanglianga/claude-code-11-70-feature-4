@@ -4,10 +4,11 @@
       <div class="head">
         <span>质量结论（范围 / 时序 / 设备状态三项检查）</span>
         <div class="filters">
-          <el-select v-model="conclusion" placeholder="结论" size="small" clearable style="width: 150px" @change="load(1)">
+          <el-select v-model="conclusion" placeholder="结论" size="small" clearable style="width: 200px" @change="load(1)">
             <el-option label="正常" value="normal" />
             <el-option label="超标" value="exceed" />
             <el-option label="待核（校准/维护/时序异常）" value="pending_review" />
+            <el-option label="延迟待判（规则维护中）" value="pending_judgment" />
           </el-select>
           <el-button size="small" @click="load(1)">刷新</el-button>
         </div>
@@ -28,11 +29,15 @@
       <el-table-column label="设备状态" width="80">
         <template #default="{ row }"><span :class="row.device_status_ok ? 'ok' : 'warn'">{{ row.device_status_ok ? '✓' : '✕' }}</span></template>
       </el-table-column>
-      <el-table-column label="结论" width="110">
+      <el-table-column label="结论" width="140">
         <template #default="{ row }">
           <el-tag :type="tagType(row.conclusion)" size="small">{{ text(row.conclusion) }}</el-tag>
           <el-tag v-if="!row.confirmed" type="info" size="small" style="margin-left:4px">未确认</el-tag>
+          <el-tag v-if="row.deferred" type="warning" size="small" style="margin-left:4px">补判</el-tag>
         </template>
+      </el-table-column>
+      <el-table-column label="规则版本" width="90">
+        <template #default="{ row }">{{ row.rule_version ?? '-' }}</template>
       </el-table-column>
       <el-table-column prop="detail" label="说明" show-overflow-tooltip />
       <el-table-column prop="created_at" label="生成时间(UTC)" width="180" />
@@ -53,10 +58,10 @@ const loading = ref(false)
 const conclusion = ref('')
 
 function tagType(c) {
-  return c === 'normal' ? 'success' : c === 'exceed' ? 'danger' : 'warning'
+  return c === 'normal' ? 'success' : c === 'exceed' ? 'danger' : c === 'pending_judgment' ? 'info' : 'warning'
 }
 function text(c) {
-  return c === 'normal' ? '正常' : c === 'exceed' ? '超标' : '待核'
+  return c === 'normal' ? '正常' : c === 'exceed' ? '超标' : c === 'pending_judgment' ? '延迟待判' : '待核'
 }
 
 async function load(p = 1) {

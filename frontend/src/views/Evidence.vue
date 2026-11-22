@@ -52,6 +52,7 @@
             <template v-if="data.conclusion">
               <p>结论：<el-tag size="small" :type="data.conclusion.conclusion === 'exceed' ? 'danger' : data.conclusion.conclusion === 'normal' ? 'success' : 'warning'">{{ conclusionText(data.conclusion) }}</el-tag></p>
               <p>范围 {{ yn(data.conclusion.range_ok) }} · 时序 {{ yn(data.conclusion.ts_ok) }} · 设备 {{ yn(data.conclusion.device_status_ok) }}</p>
+              <p v-if="data.conclusion.rule_version">规则版本：v{{ data.conclusion.rule_version }} <el-tag v-if="data.conclusion.deferred" type="warning" size="small">补判</el-tag></p>
               <p>{{ data.conclusion.detail }}</p>
             </template>
             <el-empty v-else description="待生成" :image-size="40" />

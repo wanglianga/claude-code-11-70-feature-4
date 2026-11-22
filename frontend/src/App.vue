@@ -36,6 +36,10 @@ const menus = [
   { path: '/devices', title: '设备目录' },
   { path: '/policies', title: '策略台账' },
   { path: '/recovery', title: '恢复编排' },
+  { path: '/rules', title: '规则目录' },
+  { path: '/pending', title: '待判队列' },
+  { path: '/replay', title: '回放沙箱' },
+  { path: '/corrections', title: '影响通知册' },
   { path: '/evidence', title: '证据链' },
   { path: '/simulate', title: '场景模拟' },
 ]

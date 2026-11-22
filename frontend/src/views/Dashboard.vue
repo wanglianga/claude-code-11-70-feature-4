@@ -3,13 +3,18 @@
     <el-alert v-if="summary.degraded" type="error" :closable="false" show-icon class="mb"
       title="写入延迟跨过高风险阈值：调度器已降级 —— 暂停低风险衍生计算，为高风险分区保留写入额度" />
     <el-row :gutter="12">
-      <el-col :span="4"><el-card><div class="num">{{ summary.total_received ?? '-' }}</div><div class="lbl">接收日志总数</div></el-card></el-col>
-      <el-col :span="4"><el-card><div class="num ok">{{ summary.confirmed ?? '-' }}</div><div class="lbl">已确认读数</div></el-card></el-col>
-      <el-col :span="4"><el-card><div class="num">{{ summary.duplicate ?? '-' }}</div><div class="lbl">重传（只确认一次）</div></el-card></el-col>
-      <el-col :span="4"><el-card><div class="num" :class="{warn: summary.conflict}">{{ summary.conflict ?? '-' }}</div><div class="lbl">冲突证据</div></el-card></el-col>
-      <el-col :span="4"><el-card><div class="num" :class="{warn: summary.pending_review}">{{ summary.pending_review ?? '-' }}</div><div class="lbl">待核结论</div></el-card></el-col>
-      <el-col :span="4"><el-card><div class="num" :class="{bad: summary.open_alerts}">{{ summary.open_alerts ?? '-' }}</div><div class="lbl">未确认告警</div></el-card></el-col>
+      <el-col :span="3"><el-card><div class="num">{{ summary.total_received ?? '-' }}</div><div class="lbl">接收日志总数</div></el-card></el-col>
+      <el-col :span="3"><el-card><div class="num ok">{{ summary.confirmed ?? '-' }}</div><div class="lbl">已确认读数</div></el-card></el-col>
+      <el-col :span="3"><el-card><div class="num">{{ summary.duplicate ?? '-' }}</div><div class="lbl">重传（只确认一次）</div></el-card></el-col>
+      <el-col :span="3"><el-card><div class="num" :class="{warn: summary.conflict}">{{ summary.conflict ?? '-' }}</div><div class="lbl">冲突证据</div></el-card></el-col>
+      <el-col :span="3"><el-card><div class="num" :class="{warn: summary.pending_review}">{{ summary.pending_review ?? '-' }}</div><div class="lbl">待核结论</div></el-card></el-col>
+      <el-col :span="3"><el-card><div class="num" :class="{warn: summary.pending_judgment}">{{ summary.pending_judgment ?? '-' }}</div><div class="lbl">延迟待判</div></el-card></el-col>
+      <el-col :span="3"><el-card><div class="num" :class="{bad: summary.unclosed_corrections}">{{ summary.unclosed_corrections ?? '-' }}</div><div class="lbl">未闭合补正</div></el-card></el-col>
+      <el-col :span="3"><el-card><div class="num" :class="{bad: summary.open_alerts}">{{ summary.open_alerts ?? '-' }}</div><div class="lbl">未确认告警</div></el-card></el-col>
     </el-row>
+
+    <el-alert v-if="summary.pending_items" type="warning" :closable="false" show-icon class="mb"
+      :title="`规则维护期间 ${summary.pending_items} 条读数保留为待判（非合格），规则恢复后由补判调度器优先处理实时高风险，再按法定时限与时间顺序清理积压`" />
 
     <el-row :gutter="12" class="mb">
       <el-col :span="12">

@@ -70,3 +70,46 @@ class SimRealtimeIn(BaseModel):
 class SimBackfillIn(BaseModel):
     hours: float = 2.0
     step_sec: int = 60
+
+
+# ---- 延迟质量判定与告警重演 ----
+class MaintenanceIn(BaseModel):
+    rule_code: str
+    strategy: str = "snapshot"  # snapshot | event_log
+    reason: str = ""
+    partitions: list[str] = Field(default_factory=list)
+
+
+class RuleVersionIn(BaseModel):
+    params: dict[str, Any] = Field(default_factory=dict)
+    note: str = ""
+
+
+class RevokeIn(BaseModel):
+    reason: str = ""
+
+
+class PendingConfigIn(BaseModel):
+    default_strategy: Optional[str] = None
+    legal_deadline_hours: Optional[int] = None
+
+
+class RejudgeIn(BaseModel):
+    strategy: Optional[str] = None  # snapshot | event_log | all
+    rule_codes: list[str] = Field(default_factory=list)
+
+
+class ResolvePendingIn(BaseModel):
+    rule_versions: dict[str, int] = Field(default_factory=dict)  # {rule_code: 替代版本}
+    note: str = ""
+
+
+class ReplayIn(BaseModel):
+    batch_code: str
+    candidate_rule: Optional[str] = None
+    note: str = ""
+
+
+class CorrectionStatusIn(BaseModel):
+    status: str  # open | acknowledged | closed
+    note: str = ""

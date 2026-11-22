@@ -135,6 +135,13 @@ def dashboard_summary(db: Session = Depends(get_db), _: User = Depends(require_u
     conflicts = db.query(ReadingConflict).count()
     conclusions = db.query(QualityConclusion).count()
     pending_review = db.query(QualityConclusion).filter(QualityConclusion.conclusion == "pending_review").count()
+    pending_judgment = db.query(QualityConclusion).filter(QualityConclusion.conclusion == "pending_judgment").count()
+    from ..models import CorrectionItem, PendingItem
+
+    pending_items = db.query(PendingItem).filter(PendingItem.status == "pending").count()
+    unclosed_corrections = (
+        db.query(CorrectionItem).filter(CorrectionItem.status.in_(["open", "acknowledged"])).count()
+    )
     st = get_state(db)
     return {
         "total_received": total,
@@ -144,6 +151,9 @@ def dashboard_summary(db: Session = Depends(get_db), _: User = Depends(require_u
         "conflict_records": conflicts,
         "conclusions": conclusions,
         "pending_review": pending_review,
+        "pending_judgment": pending_judgment,
+        "pending_items": pending_items,
+        "unclosed_corrections": unclosed_corrections,
         "open_alerts": open_alerts,
         "max_alert_latency_ms": int(max_latency),
         "avg_alert_latency_ms": int(avg_latency),
@@ -197,6 +207,10 @@ def list_conclusions(
                 "conclusion": c.conclusion,
                 "confirmed": c.confirmed,
                 "detail": c.detail,
+                "deferred": c.deferred,
+                "rule_version": c.rule_version,
+                "missing_rules": c.missing_rules or [],
+                "rejudge_run_id": c.rejudge_run_id,
                 "created_at": c.created_at.isoformat() if c.created_at else None,
             }
             for c in rows
@@ -275,6 +289,9 @@ def evidence_chain(log_id: int, db: Session = Depends(get_db), _: User = Depends
             "ts_ok": conclusion.ts_ok,
             "device_status_ok": conclusion.device_status_ok,
             "policy_version": conclusion.policy_version,
+            "rule_version": conclusion.rule_version,
+            "deferred": conclusion.deferred,
+            "missing_rules": conclusion.missing_rules or [],
             "detail": conclusion.detail,
         }
         if conclusion

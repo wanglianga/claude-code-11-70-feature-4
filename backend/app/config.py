@@ -29,6 +29,19 @@ SCHED_TICK_LIMIT = int(os.getenv("SCHED_TICK_LIMIT", "200"))
 # 恢复编排器每次运行单分区回补上限
 RECOVERY_MAX_ITEMS = int(os.getenv("RECOVERY_MAX_ITEMS", "500"))
 
+# 延迟质量判定：规则维护期间待判队列的默认路线（snapshot | event_log）与法定补判时限（小时）
+DEFAULT_PENDING_STRATEGY = os.getenv("DEFAULT_PENDING_STRATEGY", "snapshot")
+PENDING_LEGAL_DEADLINE_HOURS = int(os.getenv("PENDING_LEGAL_DEADLINE_HOURS", "24"))
+
+# 补判调度：每 tick 处理上限 / 巡检间隔（秒）
+REJUDGE_TICK_LIMIT = int(os.getenv("REJUDGE_TICK_LIMIT", "200"))
+REJUDGE_INTERVAL_SEC = float(os.getenv("REJUDGE_INTERVAL_SEC", "2.0"))
+
+# 策略建议阈值：平均维护跨度 / 需要扫描的日志行数 / 需复现监管批次数
+STRATEGY_SPAN_THRESHOLD_HOURS = float(os.getenv("STRATEGY_SPAN_THRESHOLD_HOURS", "4"))
+STRATEGY_LOG_SCAN_THRESHOLD = int(os.getenv("STRATEGY_LOG_SCAN_THRESHOLD", "5000"))
+STRATEGY_BATCH_THRESHOLD = int(os.getenv("STRATEGY_BATCH_THRESHOLD", "3"))
+
 # 前端构建产物目录（存在时由后端直接托管，便于单进程本地运行）
 FRONTEND_DIST = os.getenv(
     "FRONTEND_DIST",

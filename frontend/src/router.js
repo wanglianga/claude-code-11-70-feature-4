@@ -9,6 +9,10 @@ const routes = [
   { path: '/devices', component: () => import('./views/Devices.vue'), meta: { title: '设备目录' } },
   { path: '/policies', component: () => import('./views/Policies.vue'), meta: { title: '策略台账' } },
   { path: '/recovery', component: () => import('./views/Recovery.vue'), meta: { title: '恢复编排' } },
+  { path: '/rules', component: () => import('./views/Rules.vue'), meta: { title: '规则目录' } },
+  { path: '/pending', component: () => import('./views/Pending.vue'), meta: { title: '待判队列' } },
+  { path: '/replay', component: () => import('./views/Replay.vue'), meta: { title: '回放沙箱' } },
+  { path: '/corrections', component: () => import('./views/Corrections.vue'), meta: { title: '影响通知册' } },
   { path: '/evidence', component: () => import('./views/Evidence.vue'), meta: { title: '证据链' } },
   { path: '/simulate', component: () => import('./views/Simulate.vue'), meta: { title: '场景模拟' } },
 ]

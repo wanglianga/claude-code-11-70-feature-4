@@ -2,9 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import Device, User
+from ..models import Device, DeviceVersion, User
 from ..schemas import DeviceIn, DevicePatch
 from ..security import require_user
+from ..services.rules import record_device_version
 
 router = APIRouter(prefix="/api/devices", tags=["devices"])
 
@@ -56,7 +57,13 @@ def patch_device(device_id: int, body: DevicePatch, db: Session = Depends(get_db
     data = body.model_dump(exclude_unset=True)
     if "status" in data and data["status"] not in ("normal", "calibrating", "maintenance"):
         raise HTTPException(400, "状态须为 normal/calibrating/maintenance")
+    changed = False
     for k, v in data.items():
+        if getattr(d, k) != v:
+            changed = True
         setattr(d, k, v)
+    if changed:
+        db.flush()
+        record_device_version(db, d, note="控制台更新设备配置")
     db.commit()
     return to_dict(d)
